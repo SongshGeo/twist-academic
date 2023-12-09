@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "twist"
+version = "0.1.0"
+description = ""
+authors = ["SongshGeo <songshgeo@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = ">=3.9,<3.12"
+qcloudsms-py = "^0.1.4"
+
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.3"
+allure-pytest = "^2.13.2"
+pytest-clarity = "^1.0.1"
+pytest-sugar = "^0.9.7"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
