@@ -1,7 +1,7 @@
 [tool.poetry]
-name = "twist"
+name = "twist-academic"
 version = "0.1.0"
-description = ""
+description = "A suite kit for personal academic life."
 authors = ["SongshGeo <songshgeo@gmail.com>"]
 readme = "README.md"
 

@@ -7,7 +7,7 @@
 
 import pytest
 
-from twist.notify import notify, notify_me_finished
+from twist_academic.notify import notify, notify_me_finished
 
 
 # @notify_me_finished(18906102996)
