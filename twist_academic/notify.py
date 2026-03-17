@@ -1,95 +1,111 @@
-#!/usr/bin/env python 3.11.0
-# -*-coding:utf-8 -*-
+#!/usr/bin/env python3
+# -*- coding:utf-8 -*-
 # @Author  : Shuang (Twist) Song
-# @Contact   : SongshGeo@gmail.com
-# GitHub   : https://github.com/SongshGeo
-# Website: https://cv.songshgeo.com/
+# @Contact : SongshGeo@gmail.com
+# @GitHub  : https://github.com/SongshGeo
 
-import logging
-import re
+from __future__ import annotations
+
+import datetime as _dt
+import socket
+import traceback
 from functools import wraps
+from typing import Any, Callable, Optional
 
-from qcloudsms_py import SmsSingleSender
-from qcloudsms_py.httpclient import HTTPError
-
-logger = logging.getLogger(__name__)
+from .lark_notify import LarkNotifier, LarkSettings
 
 
-def check_tel_number(tel_number: str | int) -> bool:
-    """检查电话号码"""
-    pattern = r"^(?:\+?86)?1(?:3\d{3}|5[^4\D]\d{2}|8\d{3}|7(?:[235-8]\d{2}|4(?:0\d|1[0-2]|9\d))|9[0-35-9]\d{2}|66\d{2})\d{6}$"
-    is_matched = bool(re.search(pattern=pattern, string=str(f"{tel_number}")))
-    return is_matched
+def _build_message(
+    *,
+    title: Optional[str],
+    func_name: Optional[str],
+    status: str,
+    start: Optional[_dt.datetime] = None,
+    end: Optional[_dt.datetime] = None,
+    exc: Optional[BaseException] = None,
+) -> str:
+    """Build plain-text content for a finished job."""
+    lines: list[str] = []
+    if title:
+        lines.append(f"[{status.upper()}] {title}")
+        lines.append("")
+    elif func_name:
+        lines.append(f"[{status.upper()}] {func_name}")
+        lines.append("")
+
+    if func_name:
+        lines.append(f"Function: {func_name}")
+    lines.append(f"Status: {status}")
+    lines.append(f"Host: {socket.gethostname()}")
+
+    if start and end:
+        lines.append(f"Started at: {start.isoformat()}")
+        lines.append(f"Finished at: {end.isoformat()}")
+        lines.append(f"Duration: {end - start}")
+
+    if exc is not None:
+        lines.append("")
+        lines.append("Exception:")
+        lines.append(f"- type: {type(exc).__name__}")
+        lines.append(f"- message: {exc}")
+        tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        lines.append("")
+        lines.append("Traceback (most recent call last):")
+        lines.append(tb)
+
+    return "\n".join(lines)
 
 
-def notify(param: str, tel_number: str | int) -> None:
-    """Sends a notification message through the Tencent cloud service.
-
-    Args:
-        num (int): The number to be included in the message.
-
-    Returns:
-        dict: A dictionary containing the status of the message.
-
-    Raises:
-        HTTPError: If there is an error with the HTTP request.
-        Exception: If there is any other error.
-
-    """
-    # 短信应用SDK AppID
-    appid = 1400630042  # SDK AppID是1400开头
-    # 短信应用SDK AppKey
-    app_key = "ad30ec46aa617263813ca8996e1a0113"
-    # 需要发送短信的手机号码
-    phone_numbers = [f"{tel_number}"]
-    # 短信模板ID，需要在短信应用中申请
-    template_id = 1299444
-    # 签名
-    sms_sign = "隅地公众号"
-
-    s_sender = SmsSingleSender(appid, app_key)
-    params = [param]  # 当模板没有参数时，`params = []`
-    try:
-        return s_sender.send_with_param(
-            86,
-            phone_numbers[0],
-            template_id,
-            params,
-            sign=sms_sign,
-            extend="",
-            ext="",
-        )
-    except (HTTPError, Exception) as e:
-        logger.debug(f"Error sending: {e}")
+def _send_text(text: str) -> None:
+    settings = LarkSettings.from_env()
+    notifier = LarkNotifier(settings)
+    notifier.send_text(text)
 
 
-def notify_me_finished(tel_number: int | str) -> callable:
-    """A decorator.
-    sends a notification message after the decorated function is called.
-
-    Args:
-        func: The function to be decorated.
-
-    Returns:
-        The decorated function.
-
-    """
-    is_matched = check_tel_number(tel_number=tel_number)
-    if not is_matched:
-        raise ValueError(f"'{tel_number}'不是有效的电话号码，请检查。")
-
-    def decorated_notify(func):
+def _decorator(title: Optional[str] = None):
+    def wrapper_func(func: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(func)
-        def wrapper(*args, **kwargs):
-            exit_code = 0
+        def inner(*args, **kwargs):
+            start = _dt.datetime.now()
+            exc: Optional[BaseException] = None
+            status = "success"
             try:
-                return func(*args, **kwargs)
-            except Exception as e:
-                exit_code = 1
-                raise e
+                result = func(*args, **kwargs)
+                return result
+            except BaseException as err:  # noqa: BLE001
+                exc = err
+                status = "failure"
+                raise
             finally:
-                notify(f"exit {exit_code}", tel_number=tel_number)
+                end = _dt.datetime.now()
+                text = _build_message(
+                    title=title,
+                    func_name=func.__name__,
+                    status=status,
+                    start=start,
+                    end=end,
+                    exc=exc,
+                )
+                _send_text(text)
 
-        return wrapper
+        return inner
 
-    return decorated_notify
+    return wrapper_func
+
+
+def notify(arg: Any = None, *, title: Optional[str] = None):
+    """Unified notification API.
+
+    Usage:
+        - @notify
+        - @notify(title="my job")
+        - notify("just send this text")
+    """
+    if isinstance(arg, str) and not callable(arg):
+        _send_text(arg if title is None else f"{title}\n\n{arg}")
+        return None
+
+    if callable(arg) and title is None:
+        return _decorator()(arg)
+
+    return _decorator(title=title)

@@ -1,10 +1,13 @@
-#!/usr/bin/env python 3.11.0
-# -*-coding:utf-8 -*-
+#!/usr/bin/env python3
+# -*- coding:utf-8 -*-
 # @Author  : Shuang (Twist) Song
-# @Contact   : SongshGeo@gmail.com
-# GitHub   : https://github.com/SongshGeo
-# Website: https://cv.songshgeo.com/
+# @Contact : SongshGeo@gmail.com
+# @GitHub  : https://github.com/SongshGeo
 
-from .notify import notify_me_finished
+from .env import load_dotenv
 
-__all__ = ["notify_me_finished"]
+load_dotenv()
+
+from .notify import notify  # noqa: E402
+
+__all__ = ["notify"]
