@@ -7,12 +7,36 @@
 from __future__ import annotations
 
 import datetime as _dt
+import os
 import socket
 import traceback
 from functools import wraps
 from typing import Any, Callable, Optional
 
 from .lark_notify import LarkNotifier, LarkSettings
+
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
+
+
+def notifications_suppressed() -> bool:
+    """Return whether outbound notifications should be skipped.
+
+    Suppression applies to :func:`notify`, :func:`maybe_notify`, and the
+    ``@notify`` decorator (all paths go through :func:`_send_text`).
+
+    Notifications are suppressed when:
+
+    - ``NO_NOTIFY`` is set to a truthy value (``1``, ``true``, ``yes``, ``on``).
+    - ``SLURM_ARRAY_TASK_ID`` is set (SLURM array job tasks; avoids N× pings).
+
+    Returns:
+        True if notifications should not be sent.
+    """
+    if os.environ.get("NO_NOTIFY", "").strip().lower() in _TRUTHY:
+        return True
+    if os.environ.get("SLURM_ARRAY_TASK_ID"):
+        return True
+    return False
 
 
 def _build_message(
@@ -57,6 +81,8 @@ def _build_message(
 
 
 def _send_text(text: str) -> None:
+    if notifications_suppressed():
+        return
     settings = LarkSettings.from_env()
     notifier = LarkNotifier(settings)
     notifier.send_text(text)
@@ -94,12 +120,15 @@ def _decorator(title: Optional[str] = None):
 
 
 def notify(arg: Any = None, *, title: Optional[str] = None):
-    """Unified notification API.
+    """Unified notification API (Feishu webhook).
 
     Usage:
         - @notify
         - @notify(title="my job")
         - notify("just send this text")
+
+    Skips sending when :func:`notifications_suppressed` is true (see
+    ``NO_NOTIFY`` and ``SLURM_ARRAY_TASK_ID``).
     """
     if isinstance(arg, str) and not callable(arg):
         _send_text(arg if title is None else f"{title}\n\n{arg}")
@@ -109,3 +138,15 @@ def notify(arg: Any = None, *, title: Optional[str] = None):
         return _decorator()(arg)
 
     return _decorator(title=title)
+
+
+def maybe_notify(msg: str) -> None:
+    """Send a plain-text notification unless suppression is active.
+
+    Alias for ``notify(msg)``; kept for call sites that already use
+    ``maybe_notify``. Suppression is enforced in :func:`_send_text`.
+
+    Args:
+        msg: Message body to send to the configured Feishu webhook.
+    """
+    notify(msg)
