@@ -8,6 +8,6 @@ from .env import load_dotenv
 
 load_dotenv()
 
-from .notify import notify  # noqa: E402
+from .notify import maybe_notify, notifications_suppressed, notify  # noqa: E402
 
-__all__ = ["notify"]
+__all__ = ["maybe_notify", "notifications_suppressed", "notify"]

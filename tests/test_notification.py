@@ -15,7 +15,11 @@ from pytest import MonkeyPatch
 
 from twist_academic.env import load_dotenv
 from twist_academic.lark_notify import LarkNotifier, LarkSettings
-from twist_academic.notify import notify
+from twist_academic.notify import (
+    maybe_notify,
+    notifications_suppressed,
+    notify,
+)
 
 
 class TestLarkNotifier:
@@ -166,6 +170,85 @@ class TestNotifyDecoratorAndFunction:
         assert texts[0] == "plain message"
         assert "Title" in texts[1]
         assert "body" in texts[1]
+
+
+class TestNotificationSuppression:
+    """测试集群/并行场景下的通知静音逻辑。"""
+
+    @pytest.mark.parametrize(
+        "no_notify_value, expected",
+        [
+            ("1", True),
+            ("true", True),
+            ("yes", True),
+            ("on", True),
+            ("0", False),
+            ("false", False),
+            ("", False),
+        ],
+    )
+    def test_no_notify_truthy_values(
+        self,
+        monkeypatch: MonkeyPatch,
+        no_notify_value: str,
+        expected: bool,
+    ) -> None:
+        """NO_NOTIFY 为常见真值字符串时启用静音，其它值不静音。"""
+        monkeypatch.delenv("SLURM_ARRAY_TASK_ID", raising=False)
+        monkeypatch.setenv("NO_NOTIFY", no_notify_value)
+        assert notifications_suppressed() is expected
+
+    def test_slurm_array_task_id_suppresses(self, monkeypatch: MonkeyPatch) -> None:
+        """存在 SLURM_ARRAY_TASK_ID 时（任意 task 编号）应静音。"""
+        monkeypatch.delenv("NO_NOTIFY", raising=False)
+        monkeypatch.setenv("SLURM_ARRAY_TASK_ID", "17")
+        assert notifications_suppressed() is True
+
+    def test_notify_skipped_when_suppressed(self, monkeypatch: MonkeyPatch) -> None:
+        """静音开启时 notify() 不应调用 LarkNotifier.send_text。"""
+        texts: list[str] = []
+        monkeypatch.setenv("TWIST_LARK_WEBHOOK", "https://example.com/webhook")
+        monkeypatch.setenv("NO_NOTIFY", "1")
+        monkeypatch.setattr(
+            "twist_academic.lark_notify.LarkNotifier.send_text",
+            lambda self, text: texts.append(text),  # type: ignore[no-untyped-def]
+        )
+        notify("should not send")
+        assert not texts
+
+    def test_decorator_skipped_under_slurm_array(
+        self, monkeypatch: MonkeyPatch
+    ) -> None:
+        """@notify 在 SLURM array task 中也不应发送消息。"""
+        texts: list[str] = []
+        monkeypatch.setenv("TWIST_LARK_WEBHOOK", "https://example.com/webhook")
+        monkeypatch.setenv("SLURM_ARRAY_TASK_ID", "0")
+        monkeypatch.setattr(
+            "twist_academic.lark_notify.LarkNotifier.send_text",
+            lambda self, text: texts.append(text),  # type: ignore[no-untyped-def]
+        )
+
+        @notify
+        def task() -> int:
+            return 42
+
+        assert task() == 42
+        assert not texts
+
+    def test_maybe_notify_same_as_notify_when_not_suppressed(
+        self, monkeypatch: MonkeyPatch
+    ) -> None:
+        """未静音时 maybe_notify 与 notify 一样会发送消息。"""
+        texts: list[str] = []
+        monkeypatch.setenv("TWIST_LARK_WEBHOOK", "https://example.com/webhook")
+        monkeypatch.delenv("NO_NOTIFY", raising=False)
+        monkeypatch.delenv("SLURM_ARRAY_TASK_ID", raising=False)
+        monkeypatch.setattr(
+            "twist_academic.lark_notify.LarkNotifier.send_text",
+            lambda self, text: texts.append(text),  # type: ignore[no-untyped-def]
+        )
+        maybe_notify("hello")
+        assert texts == ["hello"]
 
 
 class TestLoadDotenv:
